@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Client Manager App</title>
+  <link rel="stylesheet" href="style.css">
+
+  <!-- Import Firebase SDKs (with module support) -->
+  <script type="module">
+    import { initializeApp, getApp } from 'https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js';
+    import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, getDoc, deleteDoc, query, orderBy } from 'https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js';
+    import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, onAuthStateChanged, updateProfile } from 'https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js';
+    import { sendPasswordResetEmail } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js";
+    import { setDoc } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js";
+
+        
+    // Firebase configuration
+    const firebaseConfig = {
+      apiKey: "AIzaSyD8EK673uyW5bMMOKp88EPjiIfyfZkIJiY",
+      authDomain: "test-8a637.firebaseapp.com",
+      projectId: "test-8a637",
+      storageBucket: "test-8a637.firebasestorage.app",
+      messagingSenderId: "162074938528",
+      appId: "1:162074938528:web:739481d14ae450fd70cdc5"
+    };
+
+    let app;
+  try {
+    app = getApp();
+  } catch {
+    app = initializeApp(firebaseConfig);
+  }
+
+    // Initialize Firebase
+    const db = getFirestore(app);
+    window.auth = getAuth(app);   
+
+    window.currentUserRole = null;
+    
+    window.isUserLoggedIn = function () {
+      return window.auth.currentUser !== null;
+    };
+
+    window.updateSidebarVisibility = function () {
+      const sidebar = document.getElementById("sidebarMenu");
+      if (!sidebar) return;
+      if (!isUserLoggedIn()) {
+        sidebar.style.display = "none";
+        return;
+      }
+      sidebar.style.display = "block";
+
+      // Role-based visibility
+      const adminOnlyButtons = document.querySelectorAll('.admin-only');
+      adminOnlyButtons.forEach(btn => {
+        btn.style.display = window.currentUserRole === 'admin' ? 'block' : 'none';
+      });
+    };
+
+    onAuthStateChanged(window.auth, async (user) => {
+      if (user) {
+        const userDoc = await getDoc(doc(db, "users", user.uid));
+        if (userDoc.exists()) {
+          window.currentUserRole = userDoc.data().role || 'staff';
+        } else {
+          window.currentUserRole = 'staff';
+        }
+        updateSidebarVisibility();
+        showClients();
+        showLogoutButton();
+      } else {
+        window.currentUserRole = null;
+        updateSidebarVisibility();
+        showLoginPage();
+      }
+    });
+
+
+    
+
+    // Login page
+    window.showLoginPage = function () {
+      const sidebar = document.getElementById("sidebarMenu");
+      if (sidebar) sidebar.style.display = "none";
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <div style="text-align: center; margin-top: 50px;">
+          <img src="logo.png" alt="Company Logo" style="width: 150px; margin-bottom: 20px;">
+          <h2>Login</h2>
+          <div id="loginError" style="color: red; margin-bottom: 10px;"></div>
+          <input id="loginEmail" type="email" placeholder="Email Address" style="padding: 10px; width: 250px;"><br><br>
+          <input id="loginPassword" type="password" placeholder="Password" style="padding: 10px; width: 250px;"><br><br>
+          <button onclick="loginUser()" style="padding: 10px 20px;">Login</button><br><br>
+          <a href="#" onclick="forgotPassword()">Forgot Password?</a>
+        </div>
+      `;
+    };
+
+    window.forgotPassword = async function () {
+      const email = document.getElementById("loginEmail").value;
+      if (!email) return alert("Please enter your email above first.");
+      try {
+        await sendPasswordResetEmail(window.auth, email);
+        alert("Password reset link sent to " + email);
+      } catch (error) {
+        alert("Error: " + error.message);
+      }
+    };
+
+    // Register page
+    window.showRegisterPage = function () {
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <h2>Register</h2>
+        <input id="firstName" placeholder="First Name">
+        <input id="lastName" placeholder="Last Name">
+        <input id="registerEmail" type="email" placeholder="Email Address">
+        <input id="username" placeholder="Username">
+        <input id="registerPassword" type="password" placeholder="Password">
+        <select id="userRole">
+        <option value="user">User</option>
+        <option value="manager">Manager</option>
+        <option value="admin">Admin</option>
+        </select>
+        <button onclick="registerUser()">Register</button>
+        <p>Already have an account? <a href="#" onclick="showLoginPage()">Login</a></p>
+      `;
+    };
+
+    // Register user logic
+    window.registerUser = async function () {
+      const email = document.getElementById("registerEmail").value;
+      const password = document.getElementById("registerPassword").value;
+      const firstName = document.getElementById("firstName").value;
+      const lastName = document.getElementById("lastName").value;
+      const username = document.getElementById("username").value;
+      const role = document.getElementById("userRole").value;
+
+
+      try {
+  const userCredential = await createUserWithEmailAndPassword(window.auth, email, password);
+  await updateProfile(userCredential.user, { displayName: `${firstName} ${lastName}` });
+
+  try {
+    await setDoc(doc(db, "users", userCredential.user.uid), {
+      uid: userCredential.user.uid,
+      firstName,
+      lastName,
+      email,
+      username,
+      role,
+      status: "active",
+      createdAt: new Date()
+    });
+    alert("User registered successfully");
+    showLoginPage();
+  } catch (firestoreError) {
+    alert("User created but Firestore save failed. Please contact admin.");
+    console.error("Firestore error:", firestoreError);
+  }
+
+} catch (error) {
+  alert("Registration failed: " + error.message);
+}
+    };
+
+    window.editUser = async function(userId) {
+  const userRef = doc(db, "users", userId);
+  const docSnap = await getDoc(userRef);
+  const user = docSnap.data();
+
+  const row = document.getElementById(`userRow-${userId}`);
+  row.innerHTML = `
+    <td><input id="editFirstName-${userId}" value="${user.firstName || ''}"> <input id="editLastName-${userId}" value="${user.lastName || ''}"></td>
+    <td><input id="editEmail-${userId}" value="${user.email || ''}"></td>
+    <td><input id="editUsername-${userId}" value="${user.username || ''}"></td>
+    <td>
+      <select id="editStatus-${userId}">
+        <option value="active" ${user.status === 'active' ? 'selected' : ''}>Active</option>
+        <option value="inactive" ${user.status === 'inactive' ? 'selected' : ''}>Inactive</option>
+      </select>
+    </td>
+    <td>
+      <select id="editRole-${userId}">
+        <option value="admin" ${user.role === 'admin' ? 'selected' : ''}>Admin</option>
+        <option value="manager" ${user.role === 'manager' ? 'selected' : ''}>Manager</option>
+        <option value="user" ${user.role === 'user' ? 'selected' : ''}>User</option>
+      </select>
+    </td>
+    <td>
+      <button onclick="saveUser('${userId}')">Save</button>
+      <button onclick="showUserManagement()">Cancel</button>
+    </td>
+  `;
+};
+
+window.saveUser = async function(userId) {
+  const firstName = document.getElementById(`editFirstName-${userId}`).value;
+  const lastName = document.getElementById(`editLastName-${userId}`).value;
+  const email = document.getElementById(`editEmail-${userId}`).value;
+  const username = document.getElementById(`editUsername-${userId}`).value;
+  const status = document.getElementById(`editStatus-${userId}`).value;
+  const role = document.getElementById(`editRole-${userId}`).value;
+
+  try {
+    if (confirm(`Are you sure you want to save changes and set role as "${role}"?`))
+    await updateDoc(doc(db, "users", userId), {
+      firstName,
+      lastName,
+      email,
+      username,
+      status,
+      role
+    });
+    alert("User updated successfully.");
+    showUserManagement();
+  } catch (error) {
+    alert("Error updating user: " + error.message);
+  }
+};
+
+
+    // Login user logic
+    window.loginUser = async function () {
+      const email = document.getElementById("loginEmail").value.trim();
+      const password = document.getElementById("loginPassword").value.trim();
+      const errorDiv = document.getElementById("loginError");
+      errorDiv.textContent = "";
+
+      if (!email || !password) {
+        errorDiv.textContent = "Email and password are required.";
+        return;
+      }
+
+      try {
+        const userCredential = await signInWithEmailAndPassword(window.auth, email, password);
+        const userDoc = await getDoc(doc(db, "users", userCredential.user.uid));
+
+        if (userDoc.exists() && userDoc.data().status === "inactive") {
+          errorDiv.textContent = "Your account is inactive. Please contact admin.";
+          return;
+        }
+
+        alert("Login successful");
+        window.currentUserRole = userDoc.exists() ? userDoc.data().role || 'staff' : 'staff';
+         console.log("Role after login:", window.currentUserRole);
+
+alert("Login successful");
+updateSidebarVisibility();
+showClients();
+showLogoutButton();
+
+      } catch (error) {
+        errorDiv.textContent = "Login failed: " + error.message;
+      }
+    };
+
+    // Logout logic
+    window.showLogoutButton = function () {
+      const content = document.getElementById("content");
+      const logoutBtn = document.createElement("button");
+      logoutBtn.textContent = "Logout";
+      logoutBtn.style.margin = "10px";
+      logoutBtn.onclick = logoutUser;
+      content.prepend(logoutBtn);
+    };
+
+    window.logoutUser = function () {
+      window.auth.signOut().then(() => {
+        alert("Logged out successfully");
+        currentUserRole = null;
+        updateSidebarVisibility();
+        showLoginPage();
+      }).catch((error) => {
+        alert("Logout failed: " + error.message);
+      });
+    };
+
+    // Admin - User Management
+    window.showUserManagement = async function () {
+      if (!isUserLoggedIn() || window.currentUserRole !== 'admin') {
+        alert("Access denied. Admins only.");
+        return;
+      }
+
+      const content = document.getElementById("content");
+      const querySnapshot = await getDocs(collection(db, "users"));
+
+      let html = `<h2>User Management</h2>
+<button onclick="showRegisterPage()" style="margin-bottom: 15px;">+ Register New User</button>
+<table border="1" style="width:100%;border-collapse:collapse">
+  <tr><th>Name</th><th>Email</th><th>Username</th><th>Status</th><th>Role</th><th>Actions</th></tr>`;
+
+      querySnapshot.forEach(docSnap => {
+        const user = docSnap.data();
+        const isCurrentUser = docSnap.id === window.auth.currentUser?.uid;
+
+        html += `<tr id="userRow-${docSnap.id}"> 
+          <td>${user.firstName || ''} ${user.lastName || ''}</td>
+          <td>${user.email}</td>
+          <td>${user.username || ''}</td>
+          <td>${user.status || 'active'}</td>
+          <td>`;
+
+            if (isCurrentUser) {
+  html += `${user.role || 'staff'} (You)`;
+} else {
+  html += `${user.role || 'staff'}`;
+}
+
+        html += `</td>
+          <td>
+            <button onclick="editUser('${docSnap.id}')">Edit</button>
+            <button onclick="resetUserPassword('${user.email}')">Reset Password</button>
+          </td>
+        </tr>`;
+      });
+
+      html += `</table>`;
+      content.innerHTML = html;
+    };
+
+    window.updateUserRole = async function (userId, newRole) {
+      try {
+        if (confirm(`Are you sure you want to change the user's role to "${newRole}"?`)) {
+  await updateDoc(doc(db, "users", userId), { role: newRole });
+  alert("Role updated successfully.");
+  showUserManagement();
+}
+      } catch (error) {
+        alert("Failed to update role: " + error.message);
+      }
+    };
+
+    window.toggleUserStatus = async function (userId, currentStatus) {
+      const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
+      await updateDoc(doc(db, "users", userId), { status: newStatus });
+      alert(`User ${newStatus}`);
+      showUserManagement();
+    };
+
+    window.resetUserPassword = async function (email) {
+      try {
+        await sendPasswordResetEmail(auth, email);
+        alert(`Reset link sent to ${email}`);
+      } catch (err) {
+        alert(`Error: ${err.message}`);
+      }
+    };
+
+    // Dummy Home
+    window.showHome = function () {
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <h2>Welcome to Client Manager</h2>
+        <p>Select a menu option to begin.</p>
+      `;
+    }
+
+    
+    
+
+    // Show Home Page (by default showing View Clients)
+    window.showHome = function() {
+      if (!isUserLoggedIn()) {
+    alert("Please log in to access this page.");
+    showLoginPage();
+    return;
+  }
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <h2>Welcome to Client Manager</h2>
+        <p>Select a menu option to begin.</p>
+        <button onclick="showClients()">View Clients</button>
+      `;
+      showClients();  // Default load the clients on the home page
+    };
+
+    // Fetch and display all clients with search functionality
+    window.showClients = async function () {
+      if (!isUserLoggedIn()) {
+        alert("Please log in to access this page.");
+        showLoginPage();
+        return;
+      }
+     const content = document.getElementById("content");
+    content.innerHTML = `<h2>Clients Page</h2><p>Clients will be listed here.</p>`;
+  const querySnapshot = await getDocs(collection(db, "clients"));
+  const clientList = document.getElementById("content");
+  clientList.innerHTML = ''; // Clear existing content
+
+  const table = document.createElement("table");
+  table.classList.add("clients-table");
+
+  // Table headers (removed "Medicare PTAN")
+  const headerRow = document.createElement("tr");
+  headerRow.innerHTML = `
+    <th>Practice Name</th>
+    <th>Short Name</th>
+    <th>Tax ID</th>
+    <th>NPI</th>
+    <th>Mailing Address</th>
+    <th>Actions</th>
+  `;
+  table.appendChild(headerRow);
+
+  // Search input row (removed "Medicare PTAN" search field)
+  const searchRow = document.createElement("tr");
+  searchRow.innerHTML = `
+    <td><input id="searchPracticeName" placeholder="Search Practice Name" oninput="filterTable()"></td>
+    <td><input id="searchShortName" placeholder="Search Short Name" oninput="filterTable()"></td>
+    <td><input id="searchTaxID" placeholder="Search Tax ID" oninput="filterTable()"></td>
+    <td><input id="searchNPI" placeholder="Search NPI" oninput="filterTable()"></td>
+    <td><input id="searchAddress" placeholder="Search Address" oninput="filterTable()"></td>
+    <td></td> <!-- No search input in the actions column -->
+  `;
+  table.appendChild(searchRow);
+
+  querySnapshot.forEach((doc) => {
+    const client = doc.data();
+
+    const clientItem = document.createElement("tr");
+    clientItem.classList.add('client-row');
+    clientItem.innerHTML = `
+      <td>${client.practiceName || ''}</td>
+      <td>${client.shortName || ''}</td>
+      <td>${client.taxId || ''}</td>
+      <td>${client.npi || ''}</td>
+      <td>${client.mailingAddress || ''}</td>
+      <td>
+        <button onclick="editClient('${doc.id}')">Edit</button>
+        <button onclick="deleteClient('${doc.id}')">Delete</button>
+      </td>
+    `;
+    table.appendChild(clientItem);
+  });
+
+  clientList.appendChild(table);
+};
+
+
+    // Filter the table rows based on search input
+    window.filterTable = function() {
+  const practiceNameSearch = document.getElementById("searchPracticeName").value.toLowerCase();
+  const shortNameSearch = document.getElementById("searchShortName").value.toLowerCase();
+  const taxIdSearch = document.getElementById("searchTaxID").value.toLowerCase();
+  const npiSearch = document.getElementById("searchNPI").value.toLowerCase();
+  const addressSearch = document.getElementById("searchAddress").value.toLowerCase();
+
+  const rows = document.querySelectorAll(".client-row");
+
+  rows.forEach(row => {
+    const columns = row.getElementsByTagName("td");
+    const practiceName = columns[0].textContent.toLowerCase();
+    const shortName = columns[1].textContent.toLowerCase();
+    const taxId = columns[2].textContent.toLowerCase();
+    const npi = columns[3].textContent.toLowerCase();
+    const address = columns[4].textContent.toLowerCase();
+
+    const matches =
+      practiceName.includes(practiceNameSearch) &&
+      shortName.includes(shortNameSearch) &&
+      taxId.includes(taxIdSearch) &&
+      npi.includes(npiSearch) &&
+      address.includes(addressSearch);
+
+    row.style.display = matches ? "" : "none";
+  });
+};
+
+    // Edit a client
+    window.editClient = async function(clientId) {
+      const clientRef = doc(db, "clients", clientId);
+      const clientSnapshot = await getDoc(clientRef);
+      const client = clientSnapshot.data();
+
+      showForm(client, clientId); // Pass data to showForm for editing
+    };
+
+    // Delete a client
+    window.deleteClient = async function(clientId) {
+      const isConfirmed = confirm("Are you sure you want to delete this client?");
+      if (isConfirmed) {
+        const clientRef = doc(db, "clients", clientId);
+        await deleteDoc(clientRef);
+        alert("Client deleted successfully.");
+        showClients(); // Refresh the client list after deletion
+      }
+    };
+
+    // Show the form with client data (for new and edit)
+    window.showForm = function(clientData = {}, clientId = null) {
+      const content = document.getElementById("content");
+      content.innerHTML = `
+        <h2>${clientId ? "Edit" : "Add"} Client</h2>
+        <h3>Practice Info</h3>
+        <input id="practiceName" placeholder="Practice Name" value="${clientData.practiceName || ''}">
+        <input id="shortName" placeholder="Practice Short Name" value="${clientData.shortName || ''}">
+        <input id="mailingAddress" placeholder="Mailing Address" value="${clientData.mailingAddress || ''}">
+        <input id="npi" placeholder="Practice NPI" value="${clientData.npi || ''}">
+        <input id="taxId" placeholder="Tax ID" value="${clientData.taxId || ''}">
+        <input id="medicarePtan" placeholder="Medicare PTAN" value="${clientData.medicarePtan || ''}">
+        <input id="medicaidGroupId" placeholder="Medicaid Group ID" value="${clientData.medicaidGroupId || ''}">
+        <input id="contactName" placeholder="Contact Name" value="${clientData.contactName || ''}">
+        <input id="contactPhone" placeholder="Contact Phone" value="${clientData.contactPhone || ''}">
+        <input id="faxNumber" placeholder="Fax Number" value="${clientData.faxNumber || ''}">
+        <input id="email" placeholder="Email" value="${clientData.email || ''}">
+        <h3>Locations</h3>
+        <div id="locations">
+          ${clientData.locations && clientData.locations.length > 0 ? 
+            clientData.locations.map((loc, index) => ` 
+              <div class="location-row">
+                <input value="${loc}" placeholder="Location Address">
+                <button onclick="deleteLocation(${index})">Delete</button>
+              </div>
+            `).join('') :
+            '<div class="location-row"><input placeholder="Location Address"></div>'
+          }
+        </div>
+        <button onclick="addLocation()">+ Add Location</button>
+        <h3>Contract</h3>
+        <select id="contractSelect">
+          <option ${clientData.contractService === 'Service A' ? 'selected' : ''}>Service A</option>
+          <option ${clientData.contractService === 'Service B' ? 'selected' : ''}>Service B</option>
+        </select>
+        <button id="saveButton">${clientId ? 'Update Client' : 'Save Client'}</button>
+        <button id="cancelButton">Cancel</button>
+      `;
+
+      // Add event listeners to the buttons
+      document.getElementById('saveButton').addEventListener('click', function() {
+        if (clientId) {
+          updateClient(clientId);  // Update client
+        } else {
+          saveClient();  // Save new client
+        }
+      });
+
+      // Cancel button event listener
+      document.getElementById('cancelButton').addEventListener('click', function() {
+        showClients();  // Return to clients list without saving
+      });
+    };
+
+    // Add a location input
+    window.addLocation = function() {
+      const locDiv = document.getElementById("locations");
+      const newLoc = document.createElement("div");
+      newLoc.classList.add("location-row");
+      newLoc.innerHTML = `
+        <input placeholder="Location Address">
+        <button onclick="deleteLocation(this)">Delete</button>
+      `;
+      locDiv.appendChild(newLoc);
+    };
+
+    // Delete location input
+    window.deleteLocation = function(locationIndex) {
+      const locationRow = document.querySelectorAll(".location-row")[locationIndex];
+      locationRow.remove();
+    };
+
+    // Save new client data
+    window.saveClient = async function() {
+      await addDoc(collection(db, "clients"), {
+        practiceName: document.getElementById('practiceName').value,
+        shortName: document.getElementById('shortName').value,
+        mailingAddress: document.getElementById('mailingAddress').value,
+        npi: document.getElementById('npi').value,
+        taxId: document.getElementById('taxId').value,
+        medicarePtan: document.getElementById('medicarePtan').value,
+        medicaidGroupId: document.getElementById('medicaidGroupId').value,
+        contactName: document.getElementById('contactName').value,
+        contactPhone: document.getElementById('contactPhone').value,
+        faxNumber: document.getElementById('faxNumber').value,
+        email: document.getElementById('email').value,
+        locations: Array.from(document.querySelectorAll("#locations input")).map(input => input.value),
+        contractService: document.getElementById('contractSelect').value
+      });
+
+      showClients(); // Return to the clients list after saving
+    };
+
+    // Update client data
+    window.updateClient = async function(clientId) {
+      const clientRef = doc(db, "clients", clientId);
+      await updateDoc(clientRef, {
+        practiceName: document.getElementById('practiceName').value,
+        shortName: document.getElementById('shortName').value,
+        mailingAddress: document.getElementById('mailingAddress').value,
+        npi: document.getElementById('npi').value,
+        taxId: document.getElementById('taxId').value,
+        medicarePtan: document.getElementById('medicarePtan').value,
+        medicaidGroupId: document.getElementById('medicaidGroupId').value,
+        contactName: document.getElementById('contactName').value,
+        contactPhone: document.getElementById('contactPhone').value,
+        faxNumber: document.getElementById('faxNumber').value,
+        email: document.getElementById('email').value,
+        locations: Array.from(document.querySelectorAll("#locations input")).map(input => input.value),
+        contractService: document.getElementById('contractSelect').value
+      });
+
+      showClients(); // Return to the clients list after update
+    };
+
+    window.addEventListener("DOMContentLoaded", () => {
+  const urlParams = new URLSearchParams(window.location.search);
+  const reportId = urlParams.get('reportId');
+  if (reportId) {
+    showGraphicalCharts(reportId);
+  } else {
+    showLoginPage(); // or your default view
+  }
+});
+
+
+
+
+
+
+
+// Debounce utility
+function debounce(func, wait) {
+  let timeout;
+  return function (...args) {
+    clearTimeout(timeout);
+    timeout = setTimeout(() => func.apply(this, args), wait);
+  };
+}
+
+// Show Practice Login page
+window.showPracticeLogin = async function () {
+  if (!isUserLoggedIn()) {
+    alert("Please log in to access this page.");
+    showLoginPage();
+    return;
+  }
+  const content = document.getElementById("content");
+  content.innerHTML = `
+    <h2>Practice Login</h2>
+    <button onclick="showAddPracticeLoginForm()">Add Practice Login</button>
+
+    <div id="practiceLoginSearch">
+      <input id="searchShortName" type="text" placeholder="Search Short Name">
+      <input id="searchInsuranceName" type="text" placeholder="Search Insurance Name">
+      <input id="searchUsername" type="text" placeholder="Search Username">
+      <input id="searchPassword" type="text" placeholder="Search Password">
+      <input id="searchURL" type="text" placeholder="Search URL">
+      <input id="searchNotes" type="text" placeholder="Search Notes">
+    </div>
+
+    <div id="practiceLoginList"></div>
+  `;
+
+  const debouncedLoad = debounce(loadPracticeLogins, 300);
+  document.getElementById("searchShortName").addEventListener("input", debouncedLoad);
+  document.getElementById("searchInsuranceName").addEventListener("input", debouncedLoad);
+  document.getElementById("searchUsername").addEventListener("input", debouncedLoad);
+  document.getElementById("searchPassword").addEventListener("input", debouncedLoad);
+  document.getElementById("searchURL").addEventListener("input", debouncedLoad);
+  document.getElementById("searchNotes").addEventListener("input", debouncedLoad);
+
+  loadPracticeLogins();
+};
+
+// Load and display practice logins
+window.loadPracticeLogins = async function () {
+  const searchShortName = document.getElementById("searchShortName").value.toLowerCase();
+  const searchInsuranceName = document.getElementById("searchInsuranceName").value.toLowerCase();
+  const searchUsername = document.getElementById("searchUsername").value.toLowerCase();
+  const searchPassword = document.getElementById("searchPassword").value.toLowerCase();
+  const searchURL = document.getElementById("searchURL").value.toLowerCase();
+  const searchNotes = document.getElementById("searchNotes").value.toLowerCase();
+
+  const practiceLoginList = document.getElementById("practiceLoginList");
+  practiceLoginList.innerHTML = '';
+
+  const querySnapshot = await getDocs(collection(db, "practiceLogins"));
+
+  if (querySnapshot.empty) {
+    practiceLoginList.innerHTML = '<p>No practice logins found.</p>';
+    return;
+  }
+
+  const table = document.createElement("table");
+  table.classList.add("practice-login-table");
+
+  const headerRow = document.createElement("tr");
+  headerRow.innerHTML = `
+    <th>Practice Short Name</th>
+    <th>Insurance Name</th>
+    <th>Username</th>
+    <th>Password</th>
+    <th>URL</th>
+    <th>Notes</th>
+    <th>Actions</th>
+  `;
+  table.appendChild(headerRow);
+
+  let isAnyRowAdded = false;
+
+  for (const docSnapshot of querySnapshot.docs) {
+    const login = docSnapshot.data();
+    const clientRef = doc(db, "clients", login.practiceId);
+    const practiceSnapshot = await getDoc(clientRef);
+    const practiceData = practiceSnapshot.data();
+
+    const shortName = practiceData.shortName.toLowerCase();
+    const insuranceName = login.insuranceName ? login.insuranceName.toLowerCase() : '';
+    const username = login.username.toLowerCase();
+    const password = login.password.toLowerCase();
+    const url = login.url.toLowerCase();
+    const notes = login.notes.toLowerCase();
+
+    if (
+      shortName.includes(searchShortName) &&
+      insuranceName.includes(searchInsuranceName) &&
+      username.includes(searchUsername) &&
+      password.includes(searchPassword) &&
+      url.includes(searchURL) &&
+      notes.includes(searchNotes)
+    ) {
+      const clientRow = document.createElement("tr");
+      clientRow.innerHTML = `
+        <td>${practiceData.shortName}</td>
+        <td>${login.insuranceName}</td>
+        <td>${login.username}</td>
+        <td>${login.password}</td>
+        <td>${login.url}</td>
+        <td>${login.notes}</td>
+        <td>
+          <button onclick="editPracticeLogin('${docSnapshot.id}')">Edit</button>
+          <button onclick="deletePracticeLogin('${docSnapshot.id}')">Delete</button>
+        </td>
+      `;
+      table.appendChild(clientRow);
+      isAnyRowAdded = true;
+    }
+  }
+
+  if (!isAnyRowAdded) {
+    practiceLoginList.innerHTML = '<p>No matching practice logins found.</p>';
+  } else {
+    practiceLoginList.appendChild(table);
+  }
+};
+
+// Show Add Form
+window.showAddPracticeLoginForm = async function () {
+  const content = document.getElementById("content");
+  content.innerHTML = `
+    <h2>Add Practice Login</h2>
+    <select id="practiceSelect" onchange="updateShortName()">
+      <option>Select Practice</option>
+    </select>
+    <input id="shortName" placeholder="Short Name" readonly>
+    <input id="insuranceName" placeholder="Insurance Name">
+    <input id="username" placeholder="Username">
+    <input id="password" placeholder="Password">
+    <input id="url" placeholder="URL">
+    <textarea id="notes" placeholder="Notes"></textarea>
+    <button onclick="savePracticeLogin()">Save</button>
+    <button onclick="showPracticeLogin()">Cancel</button>
+  `;
+
+  const querySnapshot = await getDocs(collection(db, "clients"));
+  const practiceSelect = document.getElementById("practiceSelect");
+  querySnapshot.forEach((doc) => {
+    const client = doc.data();
+    const option = document.createElement("option");
+    option.value = doc.id;
+    option.textContent = client.practiceName;
+    practiceSelect.appendChild(option);
+  });
+};
+
+// Update short name on selection
+window.updateShortName = async function () {
+  const practiceId = document.getElementById("practiceSelect").value;
+  const clientRef = doc(db, "clients", practiceId);
+  const clientSnapshot = await getDoc(clientRef);
+  const client = clientSnapshot.data();
+  document.getElementById("shortName").value = client.shortName;
+};
+
+// Save new login
+window.savePracticeLogin = async function () {
+  const practiceId = document.getElementById("practiceSelect").value;
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const url = document.getElementById("url").value.trim();
+  const notes = document.getElementById("notes").value.trim();
+  const insuranceName = document.getElementById("insuranceName").value.trim();
+
+  const querySnapshot = await getDocs(collection(db, "practiceLogins"));
+  const isDuplicate = querySnapshot.docs.some((doc) => {
+    const data = doc.data();
+    return (
+      data.username.toLowerCase() === username.toLowerCase() &&
+      data.practiceId === practiceId &&
+      (data.insuranceName || "").toLowerCase() === insuranceName.toLowerCase()
+    );
+  });
+
+  if (isDuplicate) {
+    alert("A login with the same username already exists for this practice and insurance.");
+    return;
+  }
+
+  await addDoc(collection(db, "practiceLogins"), {
+    practiceId,
+    username,
+    password,
+    url,
+    notes,
+    insuranceName,
+  });
+
+  showPracticeLogin();
+};
+
+// Edit login
+window.editPracticeLogin = async function (loginId) {
+  const docRef = doc(db, "practiceLogins", loginId);
+  const loginSnapshot = await getDoc(docRef);
+  const login = loginSnapshot.data();
+
+  const clientSnapshot = await getDoc(doc(db, "clients", login.practiceId));
+  const client = clientSnapshot.data();
+
+  const content = document.getElementById("content");
+  content.innerHTML = `
+    <h2>Edit Practice Login</h2>
+    <select id="practiceSelect" onchange="updateShortName()">
+      <option>Select Practice</option>
+    </select>
+    <input id="shortName" placeholder="Short Name" readonly>
+    <input id="insuranceName" placeholder="Insurance Name">
+    <input id="username" placeholder="Username">
+    <input id="password" placeholder="Password">
+    <input id="url" placeholder="URL">
+    <textarea id="notes" placeholder="Notes"></textarea>
+    <button onclick="updatePracticeLogin('${loginId}')">Update</button>
+    <button onclick="showPracticeLogin()">Cancel</button>
+  `;
+
+  const querySnapshot = await getDocs(collection(db, "clients"));
+  const practiceSelect = document.getElementById("practiceSelect");
+  querySnapshot.forEach((doc) => {
+    const client = doc.data();
+    const option = document.createElement("option");
+    option.value = doc.id;
+    option.textContent = client.practiceName;
+    if (doc.id === login.practiceId) {
+      option.selected = true;
+    }
+    practiceSelect.appendChild(option);
+  });
+
+  document.getElementById("shortName").value = client.shortName;
+  document.getElementById("insuranceName").value = login.insuranceName || "";
+  document.getElementById("username").value = login.username;
+  document.getElementById("password").value = login.password;
+  document.getElementById("url").value = login.url;
+  document.getElementById("notes").value = login.notes || "";
+};
+
+// Update login
+window.updatePracticeLogin = async function (loginId) {
+  const practiceId = document.getElementById("practiceSelect").value;
+  const insuranceName = document.getElementById("insuranceName").value.trim();
+  const username = document.getElementById("username").value.trim();
+  const password = document.getElementById("password").value.trim();
+  const url = document.getElementById("url").value.trim();
+  const notes = document.getElementById("notes").value.trim();
+
+  const querySnapshot = await getDocs(collection(db, "practiceLogins"));
+  const isDuplicate = querySnapshot.docs.some((doc) => {
+    const data = doc.data();
+    return (
+      doc.id !== loginId &&
+      data.username.toLowerCase() === username.toLowerCase() &&
+      data.practiceId === practiceId &&
+      (data.insuranceName || "").toLowerCase() === insuranceName.toLowerCase()
+    );
+  });
+
+  if (isDuplicate) {
+    alert("Another login with the same username already exists for this practice and insurance.");
+    return;
+  }
+
+  await updateDoc(doc(db, "practiceLogins", loginId), {
+    practiceId,
+    insuranceName,
+    username,
+    password,
+    url,
+    notes,
+  });
+
+  showPracticeLogin();
+};
+
+// Delete login
+window.deletePracticeLogin = async function (loginId) {
+  const isConfirmed = confirm("Are you sure you want to delete this practice login?");
+  if (isConfirmed) {
+    await deleteDoc(doc(db, "practiceLogins", loginId));
+    loadPracticeLogins();
+  }
+};
+
+
+
+
+
+
+
+
+
+
+// Define the metrics used in the practice report (each metric is a row)
+const metrics = [
+  "No of Patients seen",
+  "No of Claims Billed",
+  "No of Claim Not Billed",
+  "Outstanding Primary Insurance",
+  "Outstanding Secondary Insurance",
+  "Total Outstanding Insurance",
+  "Outstanding Patient Balance",
+  "Total Paid Claims",
+  "Insurance Payments",
+  "Patient Payments",
+  "Total Payments",
+  "Total Percentage Paid"
+];
+
+// Generate an array of the last 7 months starting from the current month
+const getLast7Months = () => {
+  const months = [];
+  const today = new Date();
+  for (let i = 0; i < 7; i++) {
+    const date = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
+    months.push(date.toISOString().split("T")[0]);
+  }
+  return months;
+};
+
+// Display the list of saved reports with timestamps and practice names
+window.showPracticeReport = async function () {
+  if (!isUserLoggedIn()) {
+    alert("Please log in to access this page.");
+    showLoginPage();
+    return;
+  }
+  const content = document.getElementById("content");
+  content.innerHTML = `
+    <h2>Practice Reports</h2>
+    <button onclick="showAddReportForm()">Add Report</button>
+    <label for="practiceFilter">Select Practice:</label>
+    <select id="practiceFilter" onchange="filterReportsByPractice()">
+      <option value="">All Practices</option>
+    </select>
+    <div id="reportList"></div>
+  `;
+
+  const reportsSnapshot = await getDocs(query(collection(db, "practiceReports"), orderBy("timestamp", "desc")));
+
+  const clientsSnapshot = await getDocs(collection(db, "clients"));
+  const practiceFilter = document.getElementById("practiceFilter");
+
+  clientsSnapshot.forEach(doc => {
+    const client = doc.data();
+    if (client.shortName && client.practiceName) {
+      const option = document.createElement("option");
+      option.value = client.shortName;
+      option.textContent = `${client.practiceName} (${client.shortName})`;
+      practiceFilter.appendChild(option);
+    }
+  });
+
+  const allReports = [];
+  reportsSnapshot.forEach(docSnap => {
+    const report = docSnap.data();
+    report.id = docSnap.id;
+    allReports.push(report);
+  });
+
+  window.allPracticeReports = allReports;
+  window.allClients = [];
+  clientsSnapshot.forEach(doc => {
+    const client = doc.data();
+    if (client.shortName && client.practiceName) {
+      window.allClients.push({ shortName: client.shortName, practiceName: client.practiceName });
+    }
+  });
+  renderReportsByPractice();
+};
+
+// Display the form to add a new report
+window.showAddReportForm = async function () {
+  const months = getLast7Months();
+  const content = document.getElementById("content");
+
+  // Fetch all practice short names to populate the dropdown
+  const querySnapshot = await getDocs(collection(db, "clients"));
+  let practiceOptions = "";
+  querySnapshot.forEach(doc => {
+    const data = doc.data();
+    if (data.shortName && data.practiceName) {
+      practiceOptions += `<option value="${data.shortName}">${data.practiceName} (${data.shortName})</option>`;
+    }
+  });
+
+  // Inject base structure: styles, dropdown, and empty container
+  content.innerHTML = `
+    <style>
+      .highlight-percentage td:first-child { background-color: #d1e7dd; font-weight: bold; }
+      .highlight-total td:first-child { background-color: #ffeeba; font-weight: bold; }
+      .highlight-red td:first-child { background-color: #f8d7da; color: #842029; font-weight: bold; }
+      .report-buttons { margin-top: 20px; text-align: center; }
+      .report-buttons button { margin: 0 10px; padding: 10px 20px; }
+      #reportFormContainer { display: none; margin-top: 20px; }
+    </style>
+    <label for="practiceShortName">Practice Name (Short Name):</label>
+    <select id="practiceShortName" onchange="toggleReportForm()">
+      <option value="">Select Practice</option>
+      ${practiceOptions}
+    </select>
+    <div id="reportFormContainer"></div>
+  `;
+
+  // Build the form content and store for later display
+  let tableHTML = `<h2>Add Practice Report</h2>
+    <table><thead><tr><th>Metric</th>`;
+
+  months.forEach(month => {
+    const label = new Date(month).toLocaleString('default', { month: 'short', year: 'numeric' });
+    tableHTML += `<th>${label}</th>`;
+  });
+
+  tableHTML += `</tr></thead><tbody>`;
+
+  metrics.forEach((metric, rowIndex) => {
+    const highlightClass = rowIndex === 11 ? 'highlight-percentage' : rowIndex === 10 ? 'highlight-total' : rowIndex === 2 ? 'highlight-red' : '';
+    tableHTML += `<tr class="${highlightClass}"><td>${metric}</td>`;
+    months.forEach((month, colIndex) => {
+      const id = `${rowIndex}_${colIndex}`;
+      const isReadOnly = [2, 5, 10, 11].includes(rowIndex);
+      tableHTML += `<td><input type="number" step="0.01" id="${id}" ${isReadOnly ? 'readonly' : ''} oninput="autoCalculate(${colIndex})"></td>`;
+    });
+    tableHTML += `</tr>`;
+  });
+
+  tableHTML += `
+    </tbody></table>
+    <div class="report-buttons">
+      <button onclick="saveMatrixReport()">Save</button>
+      <button onclick="showPracticeReport()">Cancel</button>
+    </div>`;
+
+  // Save tableHTML globally so it can be injected when a practice is selected
+  window._reportFormHTML = tableHTML;
+
+  // Inject everything into the content container
+  content.innerHTML = `
+    <style>
+      .highlight-percentage td:first-child { background-color: #d1e7dd; font-weight: bold; }
+      .highlight-total td:first-child { background-color: #ffeeba; font-weight: bold; }
+      .highlight-red td:first-child { background-color: #f8d7da; color: #842029; font-weight: bold; }
+      .report-buttons { margin-top: 20px; text-align: center; }
+      .report-buttons button { margin: 0 10px; padding: 10px 20px; }
+    </style>
+    <label for="practiceShortName">Practice Name (Short Name):</label>
+    <select id="practiceShortName" onchange="toggleReportForm()">
+      <option value="">Select Practice</option>
+      ${practiceOptions}
+    </select>
+    ${tableHTML}
+  `;
+};
+
+// Auto-calculate formula-based fields whenever any input is updated
+window.autoCalculate = function (colIndex) {
+  const g = (r, c) => parseFloat(document.getElementById(`${r}_${c}`)?.value) || 0;
+  const s = (r, c, val) => {
+    const el = document.getElementById(`${r}_${c}`);
+    if (el) el.value = val;
+  };
+
+  // No of Claim Not Billed = Patients Seen - Claims Billed
+  s(2, colIndex, g(0, colIndex) - g(1, colIndex));
+  // Total Outstanding Insurance = Primary + Secondary
+  s(5, colIndex, g(3, colIndex) + g(4, colIndex));
+  // Total Paid Claims = Claims Billed - Total Outstanding Insurance
+  s(7, colIndex, g(1, colIndex) - g(5, colIndex));
+  // Total Payments = Insurance + Patient Payments
+  s(10, colIndex, g(8, colIndex) + g(9, colIndex));
+  // Total Percentage Paid = Paid Claims / Claims Billed * 100
+  const paidClaims = g(7, colIndex);
+  const totalClaims = g(1, colIndex);
+  const percentage = totalClaims === 0 ? 0 : (paidClaims / totalClaims) * 100;
+  s(11, colIndex, percentage.toFixed(2));
+};
+
+// Save the entire matrix of values into Firestore
+window.saveMatrixReport = async function () {
+  const months = getLast7Months();
+  const data = {
+    practiceShortName: document.getElementById("practiceShortName").value,
+    timestamp: new Date(),
+    report: {}
+  };
+
+  // Build the report object with values from the grid
+  months.forEach((month, colIndex) => {
+    data.report[month] = {};
+    metrics.forEach((metric, rowIndex) => {
+      data.report[month][metric] = parseFloat(document.getElementById(`${rowIndex}_${colIndex}`)?.value) || 0;
+    });
+  });
+
+  await addDoc(collection(db, "practiceReports"), data);
+  alert("Report saved.");
+  showPracticeReport();
+};
+
+// Show the detailed view of a single report
+window.showReportDetail = async function (reportId) {
+  const docRef = doc(db, "practiceReports", reportId);
+  const docSnap = await getDoc(docRef);
+  const report = docSnap.data();
+
+  const content = document.getElementById("content");
+  let html = `<h2>Report Detail - ${report.practiceShortName}</h2>`;
+
+  html += `<table border="1" style="border-collapse: collapse; width: 100%; margin-bottom: 20px;">`;
+
+  // Table header
+  html += `<thead><tr><th>Metric</th>`;
+  Object.keys(report.report).forEach(month => {
+    const label = new Date(month).toLocaleString('default', { month: 'short', year: 'numeric' });
+    html += `<th>${label}</th>`;
+  });
+  html += `</tr></thead><tbody>`;
+
+  // Table rows
+  const metricsList = [
+    "No of Patients seen",
+    "No of Claims Billed",
+    "No of Claim Not Billed",
+    "Outstanding Primary Insurance",
+    "Outstanding Secondary Insurance",
+    "Total Outstanding Insurance",
+    "Outstanding Patient Balance",
+    "Total Paid Claims",
+    "Insurance Payments",
+    "Patient Payments",
+    "Total Payments",
+    "Total Percentage Paid"
+  ];
+
+  metricsList.forEach(metric => {
+    html += `<tr><td><strong>${metric}</strong></td>`;
+    Object.keys(report.report).forEach(month => {
+      let val = report.report[month][metric] || 0;
+      if (metric.includes("Percentage")) {
+        val = `${val.toFixed(2)}%`;
+      }
+      html += `<td>${val}</td>`;
+    });
+    html += `</tr>`;
+  });
+
+  html += `</tbody></table>`;
+  html += `<button onclick="showPracticeReport()">Back</button>`;
+  content.innerHTML = html;
+};
+
+// Render the report list by selected practice
+window.renderReportsByPractice = function () {
+  const reportList = document.getElementById("reportList");
+  const selectedPractice = ""; // Show all reports regardless of filter
+  reportList.innerHTML = "";
+
+  const reports = window.allPracticeReports.filter(r => !selectedPractice || r.practiceShortName === selectedPractice);
+  const grouped = {};
+
+  reports.forEach(report => {
+    const key = `${report.practiceShortName}`;
+    if (!grouped[key]) grouped[key] = [];
+    grouped[key].push(report);
+  });
+
+  Object.keys(grouped).forEach(practice => {
+    const client = window.allClients?.find(c => c.shortName === practice);
+    const displayName = client ? `${client.practiceName} (${client.shortName})` : practice;
+    const wrapper = document.createElement("div");
+    wrapper.innerHTML = `<h3 style='margin-top:20px;'>${displayName}</h3>`;
+
+    grouped[practice].forEach(report => {
+      const dateStr = new Date(report.timestamp?.seconds * 1000).toLocaleString();
+      const detailsId = `details-${report.id}`;
+
+      const block = document.createElement("div");
+      block.innerHTML = `
+        <details>
+          <summary style='display: flex; align-items: center; justify-content: space-between;'>
+  <span>${practice} - ${dateStr}</span>
+  <span style='display: flex; gap: 6px;'>
+    <button onclick="showReportDetail('${report.id}')" title="View Report" style="font-size: 0.75rem; padding: 2px 6px;">📄</button>
+    <button onclick="showGraphicalCharts('${report.id}')" title="Charts" style="font-size: 0.75rem; padding: 2px 6px;">📊</button>
+    <button onclick="emailPracticeReport('${report.id}')" title="Email Report" style="font-size: 0.75rem; padding: 2px 6px;">✉️</button>
+    <button onclick="editReport('${report.id}')" title="Edit" style="font-size: 0.75rem; padding: 2px 6px;">✏️</button>
+    <button onclick="deleteReport('${report.id}')" title="Delete" style="font-size: 0.75rem; padding: 2px 6px;">🗑️</button>
+  </span>
+</summary>
+          <table border="1" style="border-collapse: collapse; margin-top: 10px;">
+            <thead>
+              <tr>
+                <th>Metric</th>
+                ${Object.keys(report.report).map(month => `<th>${new Date(month).toLocaleString('default', { month: 'short', year: 'numeric' })}</th>`).join('')}
+              </tr>
+            </thead>
+            <tbody>
+              ${metrics.map(metric => `
+                <tr>
+                  <td>${metric}</td>
+                  ${Object.keys(report.report).map(month => `<td>${metric.includes('Percentage') ? (report.report[month][metric] || 0) + '%' : (report.report[month][metric] || 0)}</td>`).join('')}
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </details>`;
+
+      wrapper.appendChild(block);
+    });
+    reportList.appendChild(wrapper);
+  });
+};
+
+
+window.emailPracticeReport = async function(reportId) {
+  const docRef = doc(db, "practiceReports", reportId);
+  const docSnap = await getDoc(docRef);
+  const report = docSnap.data();
+
+  const clientSnap = await getDocs(collection(db, "clients"));
+  let clientEmail;
+  clientSnap.forEach(doc => {
+    const c = doc.data();
+    if (c.shortName === report.practiceShortName && c.email) {
+      clientEmail = c.email;
+    }
+  });
+
+  if (!clientEmail) {
+    alert("Client email not found.");
+    return;
+  }
+
+  // Render report table into a hidden div
+  await showReportDetail(reportId);
+  const tempDiv = document.createElement("div");
+  tempDiv.style.display = "none";
+  document.body.appendChild(tempDiv);
+  tempDiv.innerHTML = document.getElementById("content").innerHTML;
+
+  const tableHTML = tempDiv.querySelector("table").outerHTML;
+  document.body.removeChild(tempDiv);
+
+  // Create chart link (deep link with reportId)
+  const chartURL = `${window.location.origin}${window.location.pathname}?reportId=${reportId}#charts`;
+
+  // Construct email HTML
+  const emailHTML = `
+    <div style="font-family: Arial, sans-serif;">
+      <h2>📋 Practice Report – ${report.practiceShortName}</h2>
+      <p>Below are the current report values:</p>
+      ${tableHTML}
+      <p style="margin-top: 20px; font-weight: bold;">Click below 👇 to view the interactive charts:</p>
+<p style="margin-bottom: 30px;">
+  <a href="${chartURL}" target="_blank" style="padding: 10px 20px; background: #007bff; color: white; text-decoration: none; border-radius: 5px;">🔗 View Interactive Charts</a>
+</p>
+      <p style="font-style: italic; color: #777;">Generated from your billing dashboard.</p>
+    </div>
+  `;
+
+  // Send the email via your backend
+  fetch('http://localhost:3001/send-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      to: clientEmail,
+      subject: `Practice Report – ${report.practiceShortName}`,
+      html: emailHTML
+    })
+  }).then(response => {
+    if (response.ok) {
+      alert("📧 Report emailed successfully.");
+    } else {
+      throw new Error("Failed to send email");
+    }
+  }).catch(error => {
+    alert("❌ Error sending email: " + error.message);
+  });
+};
+
+
+
+
+window.showGraphicalCharts = async function (reportId) {
+  const docRef = doc(db, "practiceReports", reportId);
+  const docSnap = await getDoc(docRef);
+  const report = docSnap.data();
+  const content = document.getElementById("content");
+  const months = Object.keys(report.report);
+
+  const seen = [], billed = [], notBilled = [], outstanding = [], patientAR = [], percCollected = [], labels = [], totalPayments = [];
+
+  months.forEach(month => {
+  const r = report.report[month];
+  labels.push(new Date(month).toLocaleString('default', { month: 'short', year: 'numeric' }));
+  seen.push(r["No of Patients seen"] || 0);
+  billed.push(r["No of Claims Billed"] || 0);
+  notBilled.push(r["No of Claim Not Billed"] || 0);
+  outstanding.push(parseFloat(r["Outstanding Primary Insurance"]) || 0);
+  patientAR.push(r["Outstanding Patient Balance"] || 0);
+  percCollected.push(r["Total Percentage Paid"] || 0); // ✅ Push once only
+  totalPayments.push(r["Total Payments"] || 0);
+});
+
+  content.innerHTML = `
+  <h2 style="text-align:center;">Graphical View - ${report.practiceShortName}</h2>
+  <div class="chart-container-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px; padding: 20px;">
+    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px; background: #f9f9f9;">
+      <h4 style="text-align:center;">Seen vs Billed vs Not Billed</h4>
+      <canvas id="chart1"></canvas>
+    </div>
+    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px; background: #f9f9f9;">
+      <h4 style="text-align:center;">Billed vs Outstanding</h4>
+      <canvas id="chart2"></canvas>
+    </div>
+    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px; background: #f9f9f9;">
+      <h4 style="text-align:center;">Patient AR</h4>
+      <canvas id="chart3"></canvas>
+    </div>
+    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px; background: #f9f9f9;">
+      <h4 style="text-align:center;">% Collected</h4>
+      <canvas id="chart4"></canvas>
+    </div>
+    <div style="border: 1px solid #ccc; padding: 15px; border-radius: 8px; background: #f9f9f9;">
+      <h4 style="text-align:center;">Total Payments (Pie)</h4>
+      <canvas id="chart5"></canvas>
+    </div>
+  </div>
+  <div style="text-align: center; margin-top: 20px;">
+    <button onclick="showPracticeReport()">Back</button>
+  </div>
+`;
+
+
+new Chart(document.getElementById("chart1"), {
+  type: 'bar',
+  data: {
+    labels,
+    datasets: [
+      { label: "Seen", data: seen },
+      { label: "Billed", data: billed },
+      { label: "Not Billed", data: notBilled }
+    ]
+  },
+  options: {
+    onClick: () => {
+      showPopupChart("Seen vs Billed vs Not Billed", "bar", labels, [
+        { label: "Seen", data: seen },
+        { label: "Billed", data: billed },
+        { label: "Not Billed", data: notBilled }
+      ]);
+    }
+  }
+});
+
+  new Chart(document.getElementById("chart2"), {
+    type: 'bar',
+    data: {
+      labels,
+      datasets: [
+        { label: "Billed", data: billed },
+        { label: "Outstanding", data: outstanding }
+      ]
+    },
+    options: {
+    onClick: () => {
+      showPopupChart("Billed vs Outstanding", "bar", labels, [
+        { label: "Billed", data: billed },
+        { label: "Outstanding", data: outstanding },
+        ]);
+    }
+  }
+});
+
+  new Chart(document.getElementById("chart3"), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: "Patient AR", data: patientAR }]
+    },
+    options: {
+    onClick: () => {
+      showPopupChart("Patient AR", "bar", labels, [
+        { label: "Patient AR", data: patientAR },
+             ]);
+    }
+  }
+});
+  
+
+  new Chart(document.getElementById("chart4"), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [{ label: "Percentage Collected", data: percCollected }]
+    },
+    options: {
+    onClick: () => {
+      showPopupChart("Percentage Collected", "bar", labels, [
+        { label: "Percentage Collected", data: percCollected },
+        
+      ]);
+    }
+  }
+});
+
+  new Chart(document.getElementById("chart5"), {
+    type: 'pie',
+    data: {
+      labels,
+      datasets: [{
+        label: "Payments",
+        data: totalPayments
+      }]
+    },
+    options: {
+    onClick: () => {
+      showPopupChart("Payments", "bar", labels, [
+        { label: "Payments", data: totalPayments },
+              ]);
+    }
+  }
+});
+  }
+
+
+// Global popup chart instance
+let popupChartInstance = null;
+
+window.showPopupChart = function(title, type, labels, dataset) {
+  const popup = document.getElementById("chartPopup");
+  popup.style.display = "flex";
+
+  // Destroy old chart if exists
+  if (popupChartInstance) popupChartInstance.destroy();
+
+  popupChartInstance = new Chart(document.getElementById("popupChart"), {
+    type,
+    data: {
+      labels,
+      datasets: dataset
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        title: {
+          display: true,
+          text: title
+        }
+      }
+    }
+  });
+};
+
+window.closeChartPopup = function() {
+  document.getElementById("chartPopup").style.display = "none";
+};
+
+
+
+// Filter dropdown change handler
+window.filterReportsByPractice = function () {
+  renderReportsByPractice();
+};
+
+// Edit a report document and populate form with existing values
+window.editReport = async function (reportId) {
+  const docRef = doc(db, "practiceReports", reportId);
+  const docSnap = await getDoc(docRef);
+  const report = docSnap.data();
+
+  // Pre-fill the form and override save to update instead
+  window.showAddReportForm();
+
+  // Delay population to ensure DOM is ready
+  setTimeout(() => {
+    document.getElementById("practiceShortName").value = report.practiceShortName;
+    const months = getLast7Months();
+    months.forEach((month, colIndex) => {
+      metrics.forEach((metric, rowIndex) => {
+        const input = document.getElementById(`${rowIndex}_${colIndex}`);
+        if (input) {
+          input.value = report.report[month]?.[metric] || 0;
+        }
+      });
+    });
+
+    // Override save function to update instead of add
+    const saveButton = document.querySelector(".report-buttons button[onclick='saveMatrixReport()']");
+    if (saveButton) {
+      saveButton.textContent = "Update";
+      saveButton.onclick = async function () {
+        const updatedReport = {
+          practiceShortName: document.getElementById("practiceShortName").value,
+          timestamp: new Date(),
+          report: {}
+        };
+
+        months.forEach((month, colIndex) => {
+          updatedReport.report[month] = {};
+          metrics.forEach((metric, rowIndex) => {
+            updatedReport.report[month][metric] = parseFloat(document.getElementById(`${rowIndex}_${colIndex}`)?.value) || 0;
+          });
+        });
+
+        await updateDoc(docRef, updatedReport);
+        alert("Report updated.");
+        showPracticeReport();
+      };
+    }
+  }, 500);
+};
+
+// Delete a report document from Firestore
+window.deleteReport = async function (reportId) {
+  if (confirm("Are you sure you want to delete this report?")) {
+    await deleteDoc(doc(db, "practiceReports", reportId));
+    alert("Report deleted.");
+    showPracticeReport();
+  }
+};
+
+
+
+
+
+
+
+
+
+
+  </script>
+</head>
+<body>
+
+  <!-- Chart Popup Modal -->
+<div id="chartPopup" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:rgba(0,0,0,0.6); justify-content:center; align-items:center; z-index:9999;">
+  <div style="background:white; padding:20px; border-radius:10px; position:relative; max-width:90%; max-height:90%;">
+    <span onclick="closeChartPopup()" style="position:absolute; top:10px; right:15px; font-size:18px; cursor:pointer;">❌</span>
+    <canvas id="popupChart" width="800" height="400"></canvas>
+  </div>
+</div>
+
+  <div class="container">
+    <!-- Sidebar -->
+      <aside class="sidebar" id="sidebarMenu" style="display: none;">      
+      <button onclick="showHome()">Home</button> <!-- Home button -->
+      <button onclick="showClients()">View Clients</button>
+      <button onclick="showForm()">+ New Client</button> <!-- New client button in sidebar -->
+      <button onclick="showPracticeLogin()">Practice Login</button>
+      <button onclick="showPracticeReport()">Practice Report</button>
+      <button onclick="showUserManagement()">User Management</button>
+      <button onclick="logoutUser()">Logout</button>
+      
+    </aside>
+
+    
+    
+    
+    <!-- Main content -->
+    <main class="main-content" id="content">
+      <!-- Content will be dynamically loaded here -->
+    </main>
+  </div>
+</body>
+</html>

@@ -1,0 +1,60 @@
+const express = require('express');
+const cors = require('cors');
+const nodemailer = require('nodemailer');
+const bodyParser = require('body-parser');
+
+const app = express();
+const PORT = 3001;
+
+app.use(cors());
+app.use(bodyParser.json({ limit: '10mb' }));
+
+const transporter = nodemailer.createTransport({
+  host: 'smtp.office365.com',
+  port: 587,
+  secure: false, // Use TLS
+  auth: {
+    user: 'gowtham@billq.org',     // Your GoDaddy/Office365 email
+    pass: 'G5!!5254o'            // Your actual email password
+  }
+});
+
+app.post('/send-report', async (req, res) => {
+  const { to, subject, html, images = [] } = req.body;
+
+  const attachments = images.map((base64, index) => {
+  const matches = base64.match(/^data:image\/(png|jpeg);base64,(.+)$/);
+  const extension = matches[1];
+  const data = matches[2];
+
+  return {
+    filename: `chart${index}.${extension}`,
+    content: Buffer.from(data, 'base64'),
+    cid: `chart${index}@report` // This must match img src="cid:chartX@report"
+  };
+});
+  
+    // Replace base64 <img src> with cid references
+  
+  
+
+  const mailOptions = {
+    from: 'gowtham@billq.org',
+    to,
+    subject,
+    html,
+    attachments
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    res.status(200).send('Email sent successfully');
+  } catch (error) {
+    console.error(error);
+    res.status(500).send('Error sending email');
+  }
+});
+
+app.listen(PORT, () => {
+  console.log(`Email server running on http://localhost:${PORT}`);
+});
