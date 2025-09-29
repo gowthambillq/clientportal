@@ -18,8 +18,8 @@ const transporter = nodemailer.createTransport({
   port: 587,
   secure: false, // Use TLS
   auth: {
-    user: 'gowtham@billq.org',     // Your GoDaddy/Office365 email
-    pass: 'G5!!5254o'            // Your actual email password
+    user: process.env.EMAIL_USER,     // Your GoDaddy/Office365 email
+    pass: process.env.EMAIL_PASS            // Your actual email password
   }
 });
 
@@ -62,3 +62,4 @@ app.post('/send-report', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Email server running on http://localhost:${PORT}`);
 });
+
