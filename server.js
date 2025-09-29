@@ -14,12 +14,12 @@ app.use(cors({
 app.use(bodyParser.json({ limit: '10mb' }));
 
 const transporter = nodemailer.createTransport({
-  host: 'smtp.office365.com',
+  host: "smtp.sendgrid.net",
   port: 587,
-  secure: false, // Use TLS
+  secure: false,
   auth: {
-    user: process.env.EMAIL_USER,     // Your GoDaddy/Office365 email
-    pass: process.env.EMAIL_PASS            // Your actual email password
+    user: "apikey", // this is literally the string "apikey"
+    pass: process.env.SENDGRID_API_KEY
   }
 });
 
@@ -62,4 +62,5 @@ app.post('/send-report', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Email server running on http://localhost:${PORT}`);
 });
+
 
